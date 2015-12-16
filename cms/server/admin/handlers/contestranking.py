@@ -107,7 +107,7 @@ class RankingHandler(BaseHandler):
                 row = [p.user.username,
                        "%s %s" % (p.user.first_name, p.user.last_name)]
                 for task in contest.tasks:
-                    t_score, t_partial = task_score(p, task)
+                    t_score, t_partial = task_score(p, task, contest)
                     t_score = round(t_score, task.score_precision)
                     score += t_score
                     partial = partial or t_partial

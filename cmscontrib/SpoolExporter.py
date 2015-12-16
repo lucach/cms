@@ -200,7 +200,7 @@ class SpoolExporter(object):
             for participation in self.contest.participations:
                 if participation.hidden:
                     continue
-                score, partial = task_score(participation, task)
+                score, partial = task_score(participation, task, self.contest)
                 is_partial = is_partial or partial
                 task_scores[task.id][participation.user.username] = score
                 scores[participation.user.username] += score

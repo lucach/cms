@@ -8,6 +8,7 @@
 # Copyright © 2013 Bernard Blackham <bernard@largestprime.net>
 # Copyright © 2013-2014 Luca Wehrstedt <luca.wehrstedt@gmail.com>
 # Copyright © 2014 Fabian Gundlach <320pointsguy@gmail.com>
+# Copyright © 2015 Luca Chiodini <luca@chiodini.org>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -892,12 +893,43 @@ def compute_changes_for_dataset(old_dataset, new_dataset):
 
 ## Computing global scores (for ranking). ##
 
-def task_score(participation, task):
+def submission_out_of_contest(submission_timestamp, participation, contest):
+    """Return whether a submission sent at a certain time belongs to the
+    contest, for a particular user, or not (e.g., beacuse it has been sent
+    during the analysis mode).
+
+    submission_timestamp (datetime): the timestamp at which the submission has
+        been sent.
+    participation (Participation): the participation that sent the submission.
+    contest (Contest): the contest tied with the participation.
+
+    return (bool): True if the submission does not belong to the contest,
+        False otherwise.
+
+    """
+    if contest.per_user_time is None:
+        # Fixed-window contest.
+        custom_contest_end = contest.stop + participation.delay_time + \
+            participation.extra_time
+    else:
+        # Customized-window contest.
+        if participation.starting_time is None:
+            # The user has not started his/her time frame yet.
+            custom_contest_end = contest.stop
+        else:
+            custom_contest_end = participation.starting_time + \
+                contest.per_user_time + participation.delay_time + \
+                participation.extra_time
+
+    return submission_timestamp > custom_contest_end
+
+
+def task_score(participation, task, contest):
     """Return the score of a contest's user on a task.
 
-    participation (Participation): the user and contest for which to
-        compute the score.
+    participation (Participation): the user for which to compute the score.
     task (Task): the task for which to compute the score.
+    contest (Contest): the contest for which to compute the score.
 
     return ((float, bool)): the score of user on task, and True if the
         score could change because of a submission yet to score.
@@ -909,7 +941,7 @@ def task_score(participation, task):
     # be more efficient, the query that generated task and user should have
     # come from a joinedload with the submissions, tokens and
     # submission_results table.  Doing so means that this function should incur
-    # no exta database queries.
+    # no extra database queries.
 
     # If the score could change due to submission still being compiled
     # / evaluated / scored.
@@ -931,6 +963,11 @@ def task_score(participation, task):
         max_score = 0.0
 
         for s in submissions:
+            # If this submission should not be considered, the same applies
+            # to all the following (as they are sorted by timestamp).
+            if submission_out_of_contest(s.timestamp, participation, contest):
+                break
+
             sr = s.get_result(task.active_dataset)
             if sr is not None and sr.scored():
                 max_score = max(max_score, sr.score)
@@ -950,8 +987,23 @@ def task_score(participation, task):
 
         # Last score: if the last submission is scored we use that,
         # otherwise we use 0.0 (and mark that the score is partial
-        # when the last submission could be scored).
-        last_s = submissions[-1]
+        # when the last submission could be scored). Be careful that
+        # "last submission" has to refer to the last *valid* submission.
+        last_submission_idx = len(submissions) - 1
+        valid_submission_found = False
+        while not valid_submission_found and last_submission_idx >= 0:
+            submission_timestamp = submissions[last_submission_idx].timestamp
+            if submission_out_of_contest(submission_timestamp, participation,
+                                         contest):
+                last_submission_idx -= 1
+            else:
+                valid_submission_found = True
+
+        if not valid_submission_found:
+            # This is equivalent to the "no submissions" behaviour.
+            return 0.0, False
+
+        last_s = submissions[last_submission_idx]
         last_sr = last_s.get_result(task.active_dataset)
 
         if last_sr is not None and last_sr.scored():
@@ -960,6 +1012,11 @@ def task_score(participation, task):
             partial = True
 
         for s in submissions:
+            # If this submission should not be considered, the same applies
+            # to all the following (as they are sorted by timestamp).
+            if submission_out_of_contest(s.timestamp, participation, contest):
+                break
+
             sr = s.get_result(task.active_dataset)
             if s.tokened():
                 if sr is not None and sr.scored():
