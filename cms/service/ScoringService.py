@@ -7,6 +7,7 @@
 # Copyright © 2010-2012 Matteo Boscariol <boscarim@hotmail.com>
 # Copyright © 2013 Luca Wehrstedt <luca.wehrstedt@gmail.com>
 # Copyright © 2013 Bernard Blackham <bernard@largestprime.net>
+# Copyright © 2015 Luca Chiodini <luca@chiodini.org>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -34,6 +35,7 @@ import logging
 from cms import ServiceCoord, config
 from cms.io import Executor, QueueItem, TriggeredService, rpc_method
 from cms.db import SessionGen, Submission, Dataset
+from cms.grading import submission_out_of_contest
 from cms.grading.scoretypes import get_score_type
 from cms.service import get_submission_results
 
@@ -121,10 +123,15 @@ class ScoringExecutor(Executor):
             # Store it.
             session.commit()
 
-            # If dataset is the active one, update RWS.
-            if dataset is submission.task.active_dataset:
-                self.proxy_service.submission_scored(
-                    submission_id=submission.id)
+            # Inform PS only if the submission is within contest time.
+            if not submission_out_of_contest(submission.timestamp,
+                                             submission.participation,
+                                             submission.participation.contest):
+
+                # If dataset is the active one, update RWS.
+                if dataset is submission.task.active_dataset:
+                    self.proxy_service.submission_scored(
+                        submission_id=submission.id)
 
 
 class ScoringService(TriggeredService):

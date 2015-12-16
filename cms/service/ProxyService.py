@@ -9,6 +9,7 @@
 # Copyright © 2013 Bernard Blackham <bernard@largestprime.net>
 # Copyright © 2015 Luca Versari <veluca93@gmail.com>
 # Copyright © 2015 William Di Luigi <williamdiluigi@gmail.com>
+# Copyright © 2015 Luca Chiodini <luca@chiodini.org>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -45,6 +46,7 @@ from urlparse import urljoin, urlsplit
 from cms import config
 from cms.io import Executor, QueueItem, TriggeredService, rpc_method
 from cms.db import SessionGen, Contest, Task, Submission
+from cms.grading import submission_out_of_contest
 from cms.grading.scoretypes import get_score_type
 from cmscommon.datetime import make_timestamp
 
@@ -282,6 +284,13 @@ class ProxyService(TriggeredService):
 
             for submission in contest.get_submissions():
                 if submission.participation.hidden:
+                    continue
+
+                # Do not send to RWS if the submission has been sent out of
+                # contest time.
+                if submission_out_of_contest(submission.timestamp,
+                                             submission.participation,
+                                             contest):
                     continue
 
                 # The submission result can be None if the dataset has
