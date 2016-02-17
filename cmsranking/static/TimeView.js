@@ -1,5 +1,6 @@
 /* Programming contest management system
  * Copyright © 2012 Luca Wehrstedt <luca.wehrstedt@gmail.com>
+ * Copyright © 2016 Luca Chiodini <luca@chiodini.org>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -28,6 +29,11 @@ function format_time(time, full) {
 function _get_time() {
     // Return the seconds since January 1, 1970 00:00:00 UTC
     return $.now() / 1000;
+}
+
+function _get_timezoned_time(server_utc_offset) {
+    var local_utc_offset = new Date().getTimezoneOffset() * -60;
+    return _get_time() + server_utc_offset - local_utc_offset;
 }
 
 var TimeView = new function () {
@@ -140,6 +146,16 @@ var TimeView = new function () {
                     time = cur_time - c['begin'];
                 }
             }
+        }
+
+        // If we are showing the clock and we have information about a contest,
+        // set the clock in the contest timezone. Adding the offset could
+        // change the day, so it has to be redetermined.
+        if (self.status == 2 && c != null) {
+            var timezoned_time = _get_timezoned_time(c["tz_offset"]);
+            date = new Date(timezoned_time * 1000);
+            today = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+            time = timezoned_time - today.getTime() / 1000;
         }
 
         var time_str = format_time(Math.abs(Math.floor(time)), full_time);
