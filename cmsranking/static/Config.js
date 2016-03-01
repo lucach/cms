@@ -1,5 +1,6 @@
 /* Programming contest management system
  * Copyright © 2012 Luca Wehrstedt <luca.wehrstedt@gmail.com>
+ * Copyright © 2016 Luca Chiodini <luca@chiodini.org>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -72,5 +73,9 @@ var Config = new function () {
 
     self.get_history_url = function () {
         return "history";
+    }
+
+    self.get_time_url = function () {
+        return "time"
     }
 };

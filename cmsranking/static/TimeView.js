@@ -26,16 +26,6 @@ function format_time(time, full) {
     return (h + ":" + m + ":" + s);
 };
 
-function _get_time() {
-    // Return the seconds since January 1, 1970 00:00:00 UTC
-    return $.now() / 1000;
-}
-
-function _get_timezoned_time(server_utc_offset) {
-    var local_utc_offset = new Date().getTimezoneOffset() * -60;
-    return _get_time() + server_utc_offset - local_utc_offset;
-}
-
 var TimeView = new function () {
     var self = this;
 
@@ -45,7 +35,31 @@ var TimeView = new function () {
     // - 2: current (clock) time
     self.status = 0;
 
+    // Difference in milliseconds between local time and server time (not
+    // considering timezone offsets).
+    self.server_time_offset = 0;
+
+    self.get_server_time = function() {
+        // Return the seconds since January 1, 1970 00:00:00 UTC (server time)
+        return ($.now() + self.server_time_offset) / 1000;
+    };
+
+    self.get_server_timezoned_time = function(server_utc_offset) {
+        var local_utc_offset = new Date().getTimezoneOffset() * -60;
+        return self.get_server_time() + server_utc_offset - local_utc_offset;
+    };
+
     self.init = function () {
+        // Trigger a server time sync immediately, then after 10 seconds and
+        // then forever each minute.
+        self.sync_server_time();
+        window.setTimeout(function() {
+            self.sync_server_time();
+        }, 10000);
+        window.setInterval(function() {
+            self.sync_server_time();
+        }, 60000);
+
         window.setInterval(function() {
             self.on_timer();
         }, 1000);
@@ -84,14 +98,14 @@ var TimeView = new function () {
     };
 
     self.on_timer = function () {
-        var cur_time = _get_time();
+        var server_time = self.get_server_time();
         var c = null;
 
         // contests are iterated sorted by begin time
         // and the first one that's still running is chosen
         for (var j in DataStore.contest_list) {
             var contest = DataStore.contest_list[j];
-            if (cur_time <= contest['end']) {
+            if (server_time <= contest['end']) {
                 c = contest;
                 break;
             }
@@ -103,9 +117,9 @@ var TimeView = new function () {
             $("#TimeView_name").text(c["name"]);
         }
 
-        var date = new Date(cur_time * 1000);
+        var date = new Date(server_time * 1000);
         var today = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-        var time = cur_time - today.getTime() / 1000;
+        var time = server_time - today.getTime() / 1000;
 
         var full_time = false;
 
@@ -115,7 +129,7 @@ var TimeView = new function () {
             $("#TimeView").addClass("current post_cont");
             full_time = true;
         } else {
-            if (cur_time < c['begin']) {
+            if (server_time < c['begin']) {
                 // the next contest has yet to start: show remaining or clock
                 $("#TimeView").removeClass("cont post_cont");
                 $("#TimeView").addClass("pre_cont");
@@ -126,7 +140,7 @@ var TimeView = new function () {
                 } else {
                     $("#TimeView").removeClass("elapsed current");
                     $("#TimeView").addClass("remaining");
-                    time = cur_time - c['begin'];
+                    time = server_time - c['begin'];
                 }
             } else {
                 // the next contest already started: all options available
@@ -139,11 +153,11 @@ var TimeView = new function () {
                 } else if (self.status == 1) {
                     $("#TimeView").removeClass("elapsed current");
                     $("#TimeView").addClass("remaining");
-                    time = cur_time - c['end'];
+                    time = server_time - c['end'];
                 } else {
                     $("#TimeView").removeClass("remaining current");
                     $("#TimeView").addClass("elapsed");
-                    time = cur_time - c['begin'];
+                    time = server_time - c['begin'];
                 }
             }
         }
@@ -152,7 +166,7 @@ var TimeView = new function () {
         // set the clock in the contest timezone. Adding the offset could
         // change the day, so it has to be redetermined.
         if (self.status == 2 && c != null) {
-            var timezoned_time = _get_timezoned_time(c["tz_offset"]);
+            var timezoned_time = self.get_timezoned_time(c["tz_offset"]);
             date = new Date(timezoned_time * 1000);
             today = new Date(date.getFullYear(), date.getMonth(), date.getDate());
             time = timezoned_time - today.getTime() / 1000;
@@ -164,5 +178,53 @@ var TimeView = new function () {
         }
 
         $("#TimeView_time").text(time_str);
+    };
+
+    self.offsets = [];
+
+    self.sync_server_time = function() {
+        var start_time = $.now();
+        $.ajax({
+            url: Config.get_time_url(),
+            success: function (data, status, xhr) {
+                var end_time = $.now();
+                var server_timestamp = parseInt(xhr.getResponseHeader("Timestamp"));
+                var offset = (2 * server_timestamp - start_time - end_time) / 2;
+
+                // Keep only the ten most recent.
+                self.offsets.sort(function(off1, off2){return off1.idx - off2.idx});
+                if (self.offsets.length >= 10)
+                    self.offsets.shift();
+
+                self.offsets.push({'offset': offset,
+                    'rtt': end_time - start_time, 'idx': server_timestamp});
+
+                // Sort by increasing RTT.
+                self.offsets.sort(function(off1, off2){return off1.rtt - off2.rtt});
+
+                // Compute average offset considering only the 5 values with
+                // the lowest RTT.
+                var sum_offset = 0, num = Math.min(5, self.offsets.length);
+                for (var i = 0; i < num; i++)
+                    sum_offset += self.offsets[i].offset;
+                var avg_offset = sum_offset / num;
+
+                // Adjust time with smoothing. If the difference between shown
+                // and real time is greater than 10 seconds, update in one shot.
+                // Otherwise, the (small) difference is gradually corrected
+                // adding (or subtracting) 500 ms.
+                var delta = avg_offset - self.server_time_offset;
+                if (Math.abs(delta) >= 10000)
+                    self.server_time_offset += delta;
+                else
+                    if (delta > 0)
+                        self.server_time_offset += Math.min(delta, 500);
+                    else
+                        self.server_time_offset -= Math.min(-delta, 500);
+            },
+            error: function () {
+                console.info("Network error occurred while synchronizing server time");
+            }
+        });
     };
 };

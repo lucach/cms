@@ -3,6 +3,7 @@
 
 # Contest Management System - http://cms-dev.github.io/
 # Copyright © 2011-2015 Luca Wehrstedt <luca.wehrstedt@gmail.com>
+# Copyright © 2016 Luca Chiodini <luca@chiodini.org>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -389,6 +390,21 @@ class ImageHandler(object):
         return response
 
 
+class TimeHandler():
+
+    def __call__(self, environ, start_response):
+        return self.wsgi_app(environ, start_response)
+
+    @responder
+    def wsgi_app(self, environ, start_response):
+        response = Response()
+
+        response.status_code = 204  # no content
+        response.headers[b'Timestamp'] = b"%0d" % round(time.time() * 1000)
+
+        return response
+
+
 class RoutingHandler(object):
     def __init__(self, event_handler, logo_handler):
         self.router = Map(
@@ -486,6 +502,7 @@ def main():
          '/flags': ImageHandler(
              os.path.join(config.lib_dir, 'flags', '%(name)s'),
              os.path.join(config.web_dir, 'img', 'flag.png')),
+         '/time': TimeHandler()
          }), {'/': config.web_dir})
 
     servers = list()
